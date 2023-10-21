@@ -857,6 +857,7 @@ class ResidualTemporalBlock1D(nn.Module):
         embed_dim (`int`): Embedding dimension.
         kernel_size (`int` or `tuple`): Size of the convolving kernel.
         activation (`str`, defaults `mish`): It is possible to choose the right activation function.
+        groups (`int`, default `8`): Number of groups for the group normalization.
     """
 
     def __init__(
@@ -866,10 +867,11 @@ class ResidualTemporalBlock1D(nn.Module):
         embed_dim: int,
         kernel_size: Union[int, Tuple[int, int]] = 5,
         activation: str = "mish",
+        groups: int = 8,
     ):
         super().__init__()
-        self.conv_in = Conv1dBlock(inp_channels, out_channels, kernel_size)
-        self.conv_out = Conv1dBlock(out_channels, out_channels, kernel_size)
+        self.conv_in = Conv1dBlock(inp_channels, out_channels, kernel_size, groups)
+        self.conv_out = Conv1dBlock(out_channels, out_channels, kernel_size, groups)
 
         self.time_emb_act = get_activation(activation)
         self.time_emb = nn.Linear(embed_dim, out_channels)

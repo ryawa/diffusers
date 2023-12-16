@@ -643,7 +643,6 @@ class ResnetBlock1D(nn.Module):
             *,
             in_channels: int,
             out_channels: Optional[int] = None,
-            conv_shortcut: bool = False,
             dropout: float = 0.0,
             temb_channels: int = 512,
             groups: int = 32,
@@ -715,18 +714,12 @@ class ResnetBlock1D(nn.Module):
 
         self.upsample = self.downsample = None
         if self.up:
-            if kernel == "fir":
-                fir_kernel = (1, 3, 3, 1)
-                self.upsample = lambda x: upsample_1d(x, kernel=fir_kernel)
-            elif kernel == "sde_vp":
+            if kernel == "sde_vp":
                 self.upsample = partial(F.interpolate, scale_factor=2.0, mode="nearest")
             else:
                 self.upsample = Upsample1D(in_channels, use_conv=False)
         elif self.down:
-            if kernel == "fir":
-                fir_kernel = (1, 3, 3, 1)
-                self.downsample = lambda x: downsample_1d(x, kernel=fir_kernel)
-            elif kernel == "sde_vp":
+            if kernel == "sde_vp":
                 self.downsample = partial(F.avg_pool1d, kernel_size=2, stride=2)
             else:
                 self.downsample = Downsample1D(in_channels, use_conv=False, padding=1, name="op")
@@ -738,7 +731,12 @@ class ResnetBlock1D(nn.Module):
         self.conv_shortcut = None
         if self.use_conv_shortcut:
             self.conv_shortcut = conv_cls(
-                in_channels, conv_1d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
+                in_channels,
+                conv_1d_out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                bias=conv_shortcut_bias
             )
 
     def forward(self, input_tensor, temb, scale: float = 1.0):

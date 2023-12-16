@@ -1,0 +1,8 @@
+- [feat] add `LoRACompatibleConv1d`
+- [BREAKING] rename `LoRACompatibleConv` to `LoRACompatibleConv2d`
+- [test] add simple LoRA layer tests
+- [refactor] update up/down-sampling ResNet blocks 1D to match 2D
+- [refactor] update `ResnetBlock1D` to match `ResnetBlock2D`
+- [refactor] refactor `UpBlock1D`, `UpBlock1DNoSkip` to use `ResnetBlock1D` and support many more parameters
+- [refactor] refactor `get_up_block` to support new parameters for `UpBlock1D`, `UpBlock1DNoSkip`
+- [refactor] refactor `UNet1DModel` to support new parameters for `get_up_block`

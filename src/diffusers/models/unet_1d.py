@@ -60,13 +60,24 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             Tuple of downsample block types.
         up_block_types (`Tuple[str]`, *optional*, defaults to `("AttnUpBlock1D", "UpBlock1D", "UpBlock1DNoSkip")`):
             Tuple of upsample block types.
-        block_out_channels (`Tuple[int]`, *optional*, defaults to `(32, 32, 64)`):
-            Tuple of block output channels.
         mid_block_type (`str`, *optional*, defaults to `"UNetMidBlock1D"`): Block type for middle of UNet.
         out_block_type (`str`, *optional*, defaults to `None`): Optional output processing block of UNet.
+        block_out_channels (`Tuple[int]`, *optional*, defaults to `(32, 32, 64)`):
+            Tuple of block output channels.
+        layers_per_block (`int`, *optional*, defaults to 1): The number of layers per block.
+        downsample_padding (`int`, *optional*, defaults to `1`): The padding for the downsample convolution.
+        downsample_type (`str`, *optional*, defaults to `conv`):
+            The downsample type for downsampling layers. Choose between "conv" and "resnet"
+        dropout (`float`, *optional*, defaults to 0.0): The dropout probability to use.
         act_fn (`str`, defaults to `gelu`): activation function in UNet blocks.
         norm_num_groups (`int`, *optional*, defaults to 8): The number of groups for normalization.
-        layers_per_block (`int`, *optional*, defaults to 1): The number of layers per block.
+        attn_norm_num_groups (`int`, *optional*, defaults to `None`):
+            If set to an integer, a group norm layer will be created in the mid block's [`Attention`] layer with the
+            given number of groups. If left as `None`, the group norm layer will only be created if
+            `resnet_time_scale_shift` is set to `default`, and if created will have `norm_num_groups` groups.
+        norm_eps (`float`, *optional*, defaults to `1e-5`): The epsilon for normalization.
+        resnet_time_scale_shift (`str`, *optional*, defaults to `"default"`): Time scale shift config
+            for ResNet blocks (see [`~models.resnet.ResnetBlock2D`]). Choose from `default` or `scale_shift`.
         downsample_each_block (`int`, *optional*, defaults to `False`):
             Experimental feature for using a UNet without upsampling.
     """
@@ -80,24 +91,43 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         out_channels: int = 2,
         extra_in_channels: int = 0,
         time_embedding_type: str = "fourier",
+        freq_shift: float = 0.0,
         flip_sin_to_cos: bool = True,
         use_timestep_embedding: bool = False,
-        freq_shift: float = 0.0,
         down_block_types: Tuple[str] = ("DownBlock1DNoSkip", "DownBlock1D", "AttnDownBlock1D"),
         up_block_types: Tuple[str] = ("AttnUpBlock1D", "UpBlock1D", "UpBlock1DNoSkip"),
         mid_block_type: Tuple[str] = "UNetMidBlock1D",
         out_block_type: str = None,
         block_out_channels: Tuple[int] = (32, 32, 64),
         layers_per_block: int = 1,
+        mid_block_scale_factor: float = 1,
         downsample_each_block: bool = False,
+        downsample_padding: int = 1,
+        downsample_type: str = "conv",
+        upsample_type: str = "conv",
         dropout: float = 0.0,
         act_fn: str = "gelu",
         attention_head_dim: Optional[int] = 8,
         norm_num_groups: int = 1,
+        attn_norm_num_groups: Optional[int] = None,
         norm_eps: float = 1e-5,
+        resnet_time_scale_shift: str = "default",
+        add_attention: bool = True,
     ):
         super().__init__()
         self.sample_size = sample_size
+        time_embed_dim = block_out_channels[0] * 4
+
+        # Check inputs
+        if len(down_block_types) != len(up_block_types):
+            raise ValueError(
+                f"Must provide the same number of `down_block_types` as `up_block_types`. `down_block_types`: {down_block_types}. `up_block_types`: {up_block_types}."
+            )
+
+        if len(block_out_channels) != len(down_block_types):
+            raise ValueError(
+                f"Must provide the same number of `block_out_channels` as `down_block_types`. `block_out_channels`: {block_out_channels}. `down_block_types`: {down_block_types}."
+            )
 
         # time
         if time_embedding_type == "fourier":
@@ -112,7 +142,6 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             timestep_input_dim = block_out_channels[0]
 
         if use_timestep_embedding:
-            time_embed_dim = block_out_channels[0] * 4
             self.time_mlp = TimestepEmbedding(
                 in_channels=timestep_input_dim,
                 time_embed_dim=time_embed_dim,
@@ -140,20 +169,36 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 num_layers=layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
-                temb_channels=block_out_channels[0],
+                temb_channels=time_embed_dim,
                 add_downsample=not is_final_block or downsample_each_block,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                resnet_groups=norm_num_groups,
+                attention_head_dim=attention_head_dim if attention_head_dim is not None else output_channel,
+                downsample_padding=downsample_padding,
+                resnet_time_scale_shift=resnet_time_scale_shift,
+                downsample_type=downsample_type,
+                dropout=dropout,
             )
             self.down_blocks.append(down_block)
 
         # mid
         self.mid_block = get_mid_block(
             mid_block_type,
+            num_layers=layers_per_block,
             in_channels=block_out_channels[-1],
-            mid_channels=block_out_channels[-1],
             out_channels=block_out_channels[-1],
             embed_dim=block_out_channels[0],
-            num_layers=layers_per_block,
             add_downsample=downsample_each_block,
+            dropout=dropout,
+            norm_eps=norm_eps,
+            act_fn=act_fn,
+            output_scale_factor=mid_block_scale_factor,
+            resnet_time_scale_shift=resnet_time_scale_shift,
+            attention_head_dim=attention_head_dim if attention_head_dim is not None else block_out_channels[-1],
+            norm_num_groups=norm_num_groups,
+            attn_norm_num_groups=attn_norm_num_groups,
+            add_attention=add_attention,
         )
 
         # up
@@ -166,24 +211,25 @@ class UNet1DModel(ModelMixin, ConfigMixin):
 
         for i, up_block_type in enumerate(up_block_types):
             prev_output_channel = output_channel
-            output_channel = (
-                reversed_block_out_channels[i + 1] if i < len(up_block_types) - 1 else final_upsample_channels
-            )
+            output_channel = reversed_block_out_channels[i]
+            input_channel = reversed_block_out_channels[min(i + 1, len(block_out_channels) - 1)]
 
             is_final_block = i == len(block_out_channels) - 1
 
             up_block = get_up_block(
                 up_block_type,
-                num_layers=layers_per_block,
-                in_channels=prev_output_channel,
+                num_layers=layers_per_block + 1,
+                in_channels=input_channel,
                 out_channels=output_channel,
                 prev_output_channel=prev_output_channel,
-                temb_channels=block_out_channels[0],
+                temb_channels=time_embed_dim,
                 add_upsample=not is_final_block,
                 resnet_eps=norm_eps,
                 resnet_act_fn=act_fn,
                 resnet_groups=norm_num_groups,
                 attention_head_dim=attention_head_dim if attention_head_dim is not None else output_channel,
+                resnet_time_scale_shift=resnet_time_scale_shift,
+                upsample_type=upsample_type,
                 dropout=dropout,
             )
             self.up_blocks.append(up_block)

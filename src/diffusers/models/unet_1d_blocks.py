@@ -493,7 +493,7 @@ class UNetMidBlock1D(nn.Module):
         hidden_states = self.resnets[0](hidden_states, temb)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
             if attn is not None:
-                hidden_states = attn(hidden_states, temb=temb)
+                hidden_states = attn(hidden_states) # add temb when attention supports it
             hidden_states = resnet(hidden_states, temb)
 
         return hidden_states

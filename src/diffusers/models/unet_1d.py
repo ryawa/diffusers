@@ -129,6 +129,9 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 f"Must provide the same number of `block_out_channels` as `down_block_types`. `block_out_channels`: {block_out_channels}. `down_block_types`: {down_block_types}."
             )
 
+        # input
+        self.conv_in = nn.Conv1d(in_channels, block_out_channels[0], kernel_size=3, padding=1)
+
         # time
         if time_embedding_type == "fourier":
             self.time_proj = GaussianFourierProjection(
@@ -146,7 +149,6 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 in_channels=timestep_input_dim,
                 time_embed_dim=time_embed_dim,
                 act_fn=act_fn,
-                out_dim=block_out_channels[0],
             )
 
         self.down_blocks = nn.ModuleList([])
@@ -155,7 +157,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         self.out_block = None
 
         # down
-        output_channel = in_channels
+        output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
             input_channel = output_channel
             output_channel = block_out_channels[i]
@@ -188,12 +190,12 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             num_layers=layers_per_block,
             in_channels=block_out_channels[-1],
             out_channels=block_out_channels[-1],
-            embed_dim=block_out_channels[0],
+            embed_dim=time_embed_dim,
             add_downsample=downsample_each_block,
             dropout=dropout,
             norm_eps=norm_eps,
             act_fn=act_fn,
-            output_scale_factor=mid_block_scale_factor,
+            mid_block_scale_factor=mid_block_scale_factor,
             resnet_time_scale_shift=resnet_time_scale_shift,
             attention_head_dim=attention_head_dim if attention_head_dim is not None else block_out_channels[-1],
             norm_num_groups=norm_num_groups,
@@ -204,10 +206,6 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
-        if out_block_type is None:
-            final_upsample_channels = out_channels
-        else:
-            final_upsample_channels = block_out_channels[0]
 
         for i, up_block_type in enumerate(up_block_types):
             prev_output_channel = output_channel
@@ -283,23 +281,27 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             timestep_embed = timestep_embed.repeat([1, 1, sample.shape[2]]).to(sample.dtype)
             timestep_embed = timestep_embed.broadcast_to((sample.shape[:1] + timestep_embed.shape[1:]))
 
-        # 2. down
-        down_block_res_samples = ()
+        # 2. pre-process
+        sample = self.conv_in(sample)
+
+        # 3. down
+        down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
             sample, res_samples = downsample_block(hidden_states=sample, temb=timestep_embed)
             down_block_res_samples += res_samples
 
-        # 3. mid
+        # 4. mid
         if self.mid_block is not None:
             sample = self.mid_block(sample, timestep_embed)
 
-        # 4. up
+        # 5. up
         for upsample_block in self.up_blocks:
-            res_samples = down_block_res_samples[-1:]
-            down_block_res_samples = down_block_res_samples[:-1]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
+            down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
+
             sample = upsample_block(sample, res_hidden_states_tuple=res_samples, temb=timestep_embed)
 
-        # 5. post-process
+        # 6. post-process
         if self.out_block is not None:
             sample = self.out_block(sample, timestep_embed)
 

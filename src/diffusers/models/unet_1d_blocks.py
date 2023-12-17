@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import math
-from typing import Optional, Tuple, Union, Dict, Any
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -462,11 +462,7 @@ class UNetMidBlock1D(nn.Module):
         for _ in range(num_layers):
             if self.add_attention:
                 attentions.append(
-                    SelfAttention1d(
-                        in_channels,
-                        n_head=in_channels // attention_head_dim,
-                        dropout_rate=dropout
-                    )
+                    SelfAttention1d(in_channels, n_head=in_channels // attention_head_dim, dropout_rate=dropout)
                 )
             else:
                 attentions.append(None)
@@ -665,7 +661,11 @@ class DownBlock1D(nn.Module):
             self.downsamplers = nn.ModuleList(
                 [
                     Downsample1D(
-                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name='cubic'
+                        out_channels,
+                        use_conv=True,
+                        out_channels=out_channels,
+                        padding=downsample_padding,
+                        name="cubic",
                     )
                 ]
             )
@@ -791,7 +791,9 @@ class AttnUpBlock1D(nn.Module):
         self.resnets = nn.ModuleList(resnets)
 
         if upsample_type == "conv":
-            self.upsamplers = nn.ModuleList([Upsample1D(out_channels, use_conv=True, out_channels=out_channels, name='cubic')])
+            self.upsamplers = nn.ModuleList(
+                [Upsample1D(out_channels, use_conv=True, out_channels=out_channels, name="cubic")]
+            )
         elif upsample_type == "resnet":
             self.upsamplers = nn.ModuleList(
                 [
@@ -886,7 +888,9 @@ class UpBlock1D(nn.Module):
         self.resnets = nn.ModuleList(resnets)
 
         if add_upsample:
-            self.upsamplers = nn.ModuleList([Upsample1d(out_channels, use_conv=True, out_channels=out_channels, kernel="cubic")])
+            self.upsamplers = nn.ModuleList(
+                [Upsample1d(out_channels, use_conv=True, out_channels=out_channels, kernel="cubic")]
+            )
         else:
             self.upsamplers = None
 

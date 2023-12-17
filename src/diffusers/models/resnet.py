@@ -639,26 +639,26 @@ class ResnetBlock1D(nn.Module):
     """
 
     def __init__(
-            self,
-            *,
-            in_channels: int,
-            out_channels: Optional[int] = None,
-            dropout: float = 0.0,
-            temb_channels: int = 512,
-            groups: int = 32,
-            groups_out: Optional[int] = None,
-            pre_norm: bool = True,
-            eps: float = 1e-6,
-            non_linearity: str = "swish",
-            skip_time_act: bool = False,
-            time_embedding_norm: str = "default",  # default, scale_shift, ada_group, spatial
-            kernel: Optional[torch.FloatTensor] = None,
-            output_scale_factor: float = 1.0,
-            use_conv_shortcut: bool = True,
-            conv_shortcut_bias: bool = False,
-            up: bool = False,
-            down: bool = False,
-            conv_1d_out_channels: Optional[int] = None,
+        self,
+        *,
+        in_channels: int,
+        out_channels: Optional[int] = None,
+        dropout: float = 0.0,
+        temb_channels: int = 512,
+        groups: int = 32,
+        groups_out: Optional[int] = None,
+        pre_norm: bool = True,
+        eps: float = 1e-6,
+        non_linearity: str = "swish",
+        skip_time_act: bool = False,
+        time_embedding_norm: str = "default",  # default, scale_shift, ada_group, spatial
+        kernel: Optional[torch.FloatTensor] = None,
+        output_scale_factor: float = 1.0,
+        use_conv_shortcut: bool = True,
+        conv_shortcut_bias: bool = False,
+        up: bool = False,
+        down: bool = False,
+        conv_1d_out_channels: Optional[int] = None,
     ):
         super().__init__()
         self.pre_norm = pre_norm
@@ -731,12 +731,7 @@ class ResnetBlock1D(nn.Module):
         self.conv_shortcut = None
         if self.use_conv_shortcut:
             self.conv_shortcut = conv_cls(
-                in_channels,
-                conv_1d_out_channels,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-                bias=conv_shortcut_bias
+                in_channels, conv_1d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
             )
 
     def forward(self, input_tensor, temb, scale: float = 1.0):
@@ -782,9 +777,9 @@ class ResnetBlock1D(nn.Module):
             if not self.skip_time_act:
                 temb = self.nonlinearity(temb)
             temb = (
-                self.time_emb_proj(temb, scale)[:, :, None, None]
+                self.time_emb_proj(temb, scale)[:, :, None]
                 if not USE_PEFT_BACKEND
-                else self.time_emb_proj(temb)[:, :, None, None]
+                else self.time_emb_proj(temb)[:, :, None]
             )
 
         if temb is not None and self.time_embedding_norm == "default":

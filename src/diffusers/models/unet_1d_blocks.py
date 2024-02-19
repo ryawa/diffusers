@@ -15,7 +15,6 @@ import math
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from ..utils import is_torch_version, logging
@@ -285,40 +284,6 @@ _kernels = {
 }
 
 
-class Downsample1d(nn.Module):
-    def __init__(self, kernel: str = "linear", pad_mode: str = "reflect"):
-        super().__init__()
-        self.pad_mode = pad_mode
-        kernel_1d = torch.tensor(_kernels[kernel])
-        self.pad = kernel_1d.shape[0] // 2 - 1
-        self.register_buffer("kernel", kernel_1d)
-
-    def forward(self, hidden_states: torch.FloatTensor) -> torch.FloatTensor:
-        hidden_states = F.pad(hidden_states, (self.pad,) * 2, self.pad_mode)
-        weight = hidden_states.new_zeros([hidden_states.shape[1], hidden_states.shape[1], self.kernel.shape[0]])
-        indices = torch.arange(hidden_states.shape[1], device=hidden_states.device)
-        kernel = self.kernel.to(weight)[None, :].expand(hidden_states.shape[1], -1)
-        weight[indices, indices] = kernel
-        return F.conv1d(hidden_states, weight, stride=2)
-
-
-class Upsample1d(nn.Module):
-    def __init__(self, kernel: str = "linear", pad_mode: str = "reflect"):
-        super().__init__()
-        self.pad_mode = pad_mode
-        kernel_1d = torch.tensor(_kernels[kernel]) * 2
-        self.pad = kernel_1d.shape[0] // 2 - 1
-        self.register_buffer("kernel", kernel_1d)
-
-    def forward(self, hidden_states: torch.FloatTensor, temb: Optional[torch.FloatTensor] = None) -> torch.FloatTensor:
-        hidden_states = F.pad(hidden_states, ((self.pad + 1) // 2,) * 2, self.pad_mode)
-        weight = hidden_states.new_zeros([hidden_states.shape[1], hidden_states.shape[1], self.kernel.shape[0]])
-        indices = torch.arange(hidden_states.shape[1], device=hidden_states.device)
-        kernel = self.kernel.to(weight)[None, :].expand(hidden_states.shape[1], -1)
-        weight[indices, indices] = kernel
-        return F.conv_transpose1d(hidden_states, weight, stride=2, padding=self.pad * 2 + 1)
-
-
 class SelfAttention1d(nn.Module):
     def __init__(self, in_channels: int, n_head: int = 1, dropout_rate: float = 0.0):
         super().__init__()
@@ -489,7 +454,7 @@ class UNetMidBlock1D(nn.Module):
         hidden_states = self.resnets[0](hidden_states, temb)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
             if attn is not None:
-                hidden_states = attn(hidden_states) # add temb when attention supports it
+                hidden_states = attn(hidden_states)  # add temb when attention supports it
             hidden_states = resnet(hidden_states, temb)
 
         return hidden_states
@@ -560,11 +525,7 @@ class AttnDownBlock1D(nn.Module):
 
         if downsample_type == "conv":
             self.downsamplers = nn.ModuleList(
-                [
-                    Downsample1D(
-                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name="op"
-                    )
-                ]
+                [Downsample1D(out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding)]
             )
         elif downsample_type == "resnet":
             self.downsamplers = nn.ModuleList(
@@ -665,7 +626,6 @@ class DownBlock1D(nn.Module):
                         use_conv=True,
                         out_channels=out_channels,
                         padding=downsample_padding,
-                        name="cubic",
                     )
                 ]
             )
@@ -791,9 +751,7 @@ class AttnUpBlock1D(nn.Module):
         self.resnets = nn.ModuleList(resnets)
 
         if upsample_type == "conv":
-            self.upsamplers = nn.ModuleList(
-                [Upsample1D(out_channels, use_conv=True, out_channels=out_channels, name="cubic")]
-            )
+            self.upsamplers = nn.ModuleList([Upsample1D(out_channels, use_conv=True, out_channels=out_channels)])
         elif upsample_type == "resnet":
             self.upsamplers = nn.ModuleList(
                 [
@@ -888,9 +846,7 @@ class UpBlock1D(nn.Module):
         self.resnets = nn.ModuleList(resnets)
 
         if add_upsample:
-            self.upsamplers = nn.ModuleList(
-                [Upsample1d(out_channels, use_conv=True, out_channels=out_channels, kernel="cubic")]
-            )
+            self.upsamplers = nn.ModuleList([Upsample1D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
             self.upsamplers = None
 

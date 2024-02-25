@@ -227,12 +227,12 @@ class MidResTemporalBlock1D(nn.Module):
 
 
 class OutConv1DBlock(nn.Module):
-    def __init__(self, num_groups_out: int, out_channels: int, embed_dim: int, act_fn: str):
+    def __init__(self, in_channels: int, out_channels: int, num_groups_out: int, embed_dim: int, act_fn: str):
         super().__init__()
-        self.final_conv1d_1 = nn.Conv1d(embed_dim, embed_dim, 5, padding=2)
-        self.final_conv1d_gn = nn.GroupNorm(num_groups_out, embed_dim)
+        self.final_conv1d_1 = nn.Conv1d(in_channels, in_channels, 5, padding=2)
+        self.final_conv1d_gn = nn.GroupNorm(num_groups_out, in_channels)
         self.final_conv1d_act = get_activation(act_fn)
-        self.final_conv1d_2 = nn.Conv1d(embed_dim, out_channels, 1)
+        self.final_conv1d_2 = nn.Conv1d(in_channels, out_channels, 1)
 
     def forward(self, hidden_states: torch.FloatTensor, temb: Optional[torch.FloatTensor] = None) -> torch.FloatTensor:
         hidden_states = self.final_conv1d_1(hidden_states)
@@ -1224,10 +1224,23 @@ def get_mid_block(
 
 
 def get_out_block(
-    *, out_block_type: str, num_groups_out: int, embed_dim: int, out_channels: int, act_fn: str, fc_dim: int
+    *,
+    out_block_type: str,
+    in_channels: int,
+    out_channels: int,
+    num_groups_out: int,
+    embed_dim: int,
+    act_fn: str,
+    fc_dim: int,
 ) -> Optional[OutBlockType]:
     if out_block_type == "OutConv1DBlock":
-        return OutConv1DBlock(num_groups_out, out_channels, embed_dim, act_fn)
+        return OutConv1DBlock(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            num_groups_out=num_groups_out,
+            embed_dim=embed_dim,
+            act_fn=act_fn,
+        )
     elif out_block_type == "ValueFunction":
         return OutValueFunctionBlock(fc_dim, embed_dim, act_fn)
     return None

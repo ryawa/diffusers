@@ -80,6 +80,8 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             for ResNet blocks (see [`~models.resnet.ResnetBlock2D`]). Choose from `default` or `scale_shift`.
         downsample_each_block (`int`, *optional*, defaults to `False`):
             Experimental feature for using a UNet without upsampling.
+        conditioning_channels (`int`, *optional*, defaults to `None`): The number of channels in the conditioning input.
+        use_conditioning_embedding (`bool`, *optional*, defaults to `False`): Whether to use a conditioning embedding.
     """
 
     @register_to_config
@@ -113,10 +115,13 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         norm_eps: float = 1e-5,
         resnet_time_scale_shift: str = "default",
         add_attention: bool = True,
+        conditioning_channels: Optional[int] = None,
+        use_conditioning_embedding: bool = False,
     ):
         super().__init__()
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
+        embed_dim = time_embed_dim
 
         # Check inputs
         if len(down_block_types) != len(up_block_types):
@@ -151,6 +156,18 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 act_fn=act_fn,
             )
 
+        # conditioning
+        if conditioning_channels is not None:
+            self.conditioning_channels = conditioning_channels
+            self.use_conditioning_embedding = use_conditioning_embedding
+            if use_conditioning_embedding:
+                self.conditioning_mlp = TimestepEmbedding(
+                    in_channels=conditioning_channels,
+                    time_embed_dim=time_embed_dim,
+                    act_fn=act_fn,
+                )
+            embed_dim += time_embed_dim
+
         self.down_blocks = nn.ModuleList([])
         self.mid_block = None
         self.up_blocks = nn.ModuleList([])
@@ -171,7 +188,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 num_layers=layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
-                temb_channels=time_embed_dim,
+                temb_channels=embed_dim,
                 add_downsample=not is_final_block or downsample_each_block,
                 resnet_eps=norm_eps,
                 resnet_act_fn=act_fn,
@@ -190,7 +207,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             num_layers=layers_per_block,
             in_channels=block_out_channels[-1],
             out_channels=block_out_channels[-1],
-            embed_dim=time_embed_dim,
+            embed_dim=embed_dim,
             add_downsample=downsample_each_block,
             dropout=dropout,
             norm_eps=norm_eps,
@@ -220,7 +237,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 in_channels=input_channel,
                 out_channels=output_channel,
                 prev_output_channel=prev_output_channel,
-                temb_channels=time_embed_dim,
+                temb_channels=embed_dim,
                 add_upsample=not is_final_block,
                 resnet_eps=norm_eps,
                 resnet_act_fn=act_fn,
@@ -237,9 +254,10 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         num_groups_out = norm_num_groups if norm_num_groups is not None else min(block_out_channels[0] // 4, 32)
         self.out_block = get_out_block(
             out_block_type=out_block_type,
-            num_groups_out=num_groups_out,
-            embed_dim=block_out_channels[0],
+            in_channels=block_out_channels[0],
             out_channels=out_channels,
+            num_groups_out=num_groups_out,
+            embed_dim=embed_dim,
             act_fn=act_fn,
             fc_dim=block_out_channels[-1] // 4,
         )
@@ -248,6 +266,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
+        conditioning: Optional[torch.Tensor] = None,
         return_dict: bool = True,
     ) -> Union[UNet1DOutput, Tuple]:
         r"""
@@ -257,6 +276,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             sample (`torch.FloatTensor`):
                 The noisy input tensor with the following shape `(batch_size, num_channels, sample_size)`.
             timestep (`torch.FloatTensor` or `float` or `int`): The number of timesteps to denoise an input.
+            conditioning (`torch.FloatTensor`, *optional*, defaults to `None`): Optional conditioning input.
             return_dict (`bool`, *optional*, defaults to `True`):
                 Whether or not to return a [`~models.unet_1d.UNet1DOutput`] instead of a plain tuple.
 
@@ -280,6 +300,17 @@ class UNet1DModel(ModelMixin, ConfigMixin):
             timestep_embed = timestep_embed[..., None]
             timestep_embed = timestep_embed.repeat([1, 1, sample.shape[2]]).to(sample.dtype)
             timestep_embed = timestep_embed.broadcast_to((sample.shape[:1] + timestep_embed.shape[1:]))
+        embed = timestep_embed
+
+        # 1. conditioning
+        if self.config.conditioning_channels is not None:
+            if conditioning is None:
+                raise ValueError(
+                    f"Model requires conditioning input. Please provide a conditioning input. `conditioning`: {conditioning}."
+                )
+            if self.config.use_conditioning_embedding:
+                conditioning = self.conditioning_mlp(conditioning)
+            embed = torch.cat([embed, conditioning], dim=1)
 
         # 2. pre-process
         sample = self.conv_in(sample)
@@ -287,23 +318,23 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         # 3. down
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
-            sample, res_samples = downsample_block(hidden_states=sample, temb=timestep_embed)
+            sample, res_samples = downsample_block(hidden_states=sample, temb=embed)
             down_block_res_samples += res_samples
 
         # 4. mid
         if self.mid_block is not None:
-            sample = self.mid_block(sample, timestep_embed)
+            sample = self.mid_block(sample, temb=embed)
 
         # 5. up
         for upsample_block in self.up_blocks:
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
             down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
 
-            sample = upsample_block(sample, res_hidden_states_tuple=res_samples, temb=timestep_embed)
+            sample = upsample_block(sample, res_hidden_states_tuple=res_samples, temb=embed)
 
         # 6. post-process
         if self.out_block is not None:
-            sample = self.out_block(sample, timestep_embed)
+            sample = self.out_block(sample, temb=embed)
 
         if not return_dict:
             return (sample,)

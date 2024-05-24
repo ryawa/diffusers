@@ -665,8 +665,6 @@ class DownBlock1D(nn.Module):
             for downsampler in self.downsamplers:
                 hidden_states = downsampler(hidden_states, scale=scale)
 
-            output_states = output_states + (hidden_states,)
-
         return hidden_states, output_states
 
 
@@ -695,7 +693,7 @@ class AttnUpBlock1D(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        prev_output_channel: int,
+        skip_channels: int,
         out_channels: int,
         temb_channels: int,
         resolution_idx: int = None,
@@ -723,8 +721,8 @@ class AttnUpBlock1D(nn.Module):
             attention_head_dim = out_channels
 
         for i in range(num_layers):
-            res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
-            resnet_in_channels = prev_output_channel if i == 0 else out_channels
+            res_skip_channels = skip_channels if (i == num_layers - 1) else out_channels
+            resnet_in_channels = in_channels if i == 0 else out_channels
 
             resnets.append(
                 ResnetBlock1D(
@@ -807,7 +805,7 @@ class UpBlock1D(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        prev_output_channel: int,
+        skip_channels: int,
         out_channels: int,
         temb_channels: int,
         resolution_idx: int = None,
@@ -825,8 +823,8 @@ class UpBlock1D(nn.Module):
         resnets = []
 
         for i in range(num_layers):
-            res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
-            resnet_in_channels = prev_output_channel if i == 0 else out_channels
+            res_skip_channels = skip_channels
+            resnet_in_channels = in_channels if i == 0 else out_channels
 
             resnets.append(
                 ResnetBlock1D(
@@ -917,7 +915,7 @@ class UpBlock1DNoSkip(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        prev_output_channel: int,
+        skip_channels: int,
         out_channels: int,
         resolution_idx: int = None,
         dropout: float = 0.0,
@@ -932,8 +930,8 @@ class UpBlock1DNoSkip(nn.Module):
 
         for i in range(num_layers):
             is_last = i == num_layers - 1
-            res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
-            resnet_in_channels = prev_output_channel if i == 0 else out_channels
+            res_skip_channels = skip_channels if (i == num_layers - 1) else out_channels
+            resnet_in_channels = in_channels if i == 0 else out_channels
 
             resnets.append(
                 ResnetBlock1D(
@@ -1090,7 +1088,7 @@ def get_up_block(
     num_layers: int,
     in_channels: int,
     out_channels: int,
-    prev_output_channel: int,
+    skip_channels: int,
     temb_channels: int,
     add_upsample: bool,
     resnet_eps: float,
@@ -1132,8 +1130,8 @@ def get_up_block(
         return UpBlock1D(
             num_layers=num_layers,
             in_channels=in_channels,
+            skip_channels=skip_channels,
             out_channels=out_channels,
-            prev_output_channel=prev_output_channel,
             temb_channels=temb_channels,
             resolution_idx=resolution_idx,
             dropout=dropout,
@@ -1151,8 +1149,8 @@ def get_up_block(
         return AttnUpBlock1D(
             num_layers=num_layers,
             in_channels=in_channels,
+            skip_channels=skip_channels,
             out_channels=out_channels,
-            prev_output_channel=prev_output_channel,
             temb_channels=temb_channels,
             resolution_idx=resolution_idx,
             dropout=dropout,
@@ -1167,8 +1165,8 @@ def get_up_block(
         return UpBlock1DNoSkip(
             num_layers=num_layers,
             in_channels=in_channels,
+            skip_channels=skip_channels,
             out_channels=out_channels,
-            prev_output_channel=prev_output_channel,
             resolution_idx=resolution_idx,
             dropout=dropout,
             add_upsample=add_upsample,

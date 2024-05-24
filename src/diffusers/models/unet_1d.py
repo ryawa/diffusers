@@ -174,6 +174,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         self.out_block = None
 
         # down
+        skip_channels = []
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
             input_channel = output_channel
@@ -200,6 +201,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 dropout=dropout,
             )
             self.down_blocks.append(down_block)
+            skip_channels.append(output_channel)
 
         # mid
         self.mid_block = get_mid_block(
@@ -222,21 +224,24 @@ class UNet1DModel(ModelMixin, ConfigMixin):
 
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
+        reversed_block_out_channels.append(block_out_channels[0])
+        reversed_skip_channels = list(reversed(skip_channels))
+
         output_channel = reversed_block_out_channels[0]
 
         for i, up_block_type in enumerate(up_block_types):
-            prev_output_channel = output_channel
-            output_channel = reversed_block_out_channels[i]
-            input_channel = reversed_block_out_channels[min(i + 1, len(block_out_channels) - 1)]
+            input_channel = output_channel
+            output_channel = reversed_block_out_channels[i+1]
+            skip_channel = reversed_skip_channels[i]
 
             is_final_block = i == len(block_out_channels) - 1
 
             up_block = get_up_block(
                 up_block_type,
-                num_layers=layers_per_block + 1,
+                num_layers=layers_per_block,
                 in_channels=input_channel,
+                skip_channels=skip_channel,
                 out_channels=output_channel,
-                prev_output_channel=prev_output_channel,
                 temb_channels=embed_dim,
                 add_upsample=not is_final_block,
                 resnet_eps=norm_eps,
@@ -248,7 +253,6 @@ class UNet1DModel(ModelMixin, ConfigMixin):
                 dropout=dropout,
             )
             self.up_blocks.append(up_block)
-            prev_output_channel = output_channel
 
         # out
         num_groups_out = norm_num_groups if norm_num_groups is not None else min(block_out_channels[0] // 4, 32)
@@ -289,7 +293,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         # 1. time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+            timesteps = torch.full((sample.shape[0],), timestep, dtype=torch.long, device=sample.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
 

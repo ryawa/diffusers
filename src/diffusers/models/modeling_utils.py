@@ -22,7 +22,7 @@ from collections import OrderedDict
 from functools import partial
 from typing import Any, Callable, List, Optional, Tuple, Union
 
-import safetensors
+from safetensors.torch import load_file, save_file
 import torch
 from huggingface_hub import create_repo
 from huggingface_hub.utils import validate_hf_hub_args
@@ -107,7 +107,7 @@ def load_state_dict(checkpoint_file: Union[str, os.PathLike], variant: Optional[
         if os.path.basename(checkpoint_file) == _add_variant(WEIGHTS_NAME, variant):
             return torch.load(checkpoint_file, map_location="cpu")
         else:
-            return safetensors.torch.load_file(checkpoint_file, device="cpu")
+            return load_file(checkpoint_file, device="cpu")
     except Exception as e:
         try:
             with open(checkpoint_file) as f:
@@ -516,7 +516,7 @@ class ModelMixin(torch.nn.Module, PushToHubMixin):
 
         # Save the model
         if safe_serialization:
-            safetensors.torch.save_file(
+            save_file(
                 state_dict, os.path.join(save_directory, weights_name), metadata={"format": "pt"}
             )
         else:
